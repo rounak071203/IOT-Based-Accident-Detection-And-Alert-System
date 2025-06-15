@@ -1,0 +1,102 @@
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>  // Include TinyGPS++ library
+
+// Pin configuration
+const int vibrationPin = 2; // Vibration sensor
+bool smsSent = false;       // Flag to prevent repeated SMS
+
+// SoftwareSerial for GSM and GPS
+SoftwareSerial gsm(10, 11); // GSM Module: RX, TX
+SoftwareSerial gps(4, 5);   // GPS Module: RX, TX
+
+// TinyGPS++ object
+TinyGPSPlus gpsParser;
+
+void setup() {
+  pinMode(vibrationPin, INPUT);
+  Serial.begin(9600);   // Debug monitor
+  gsm.begin(9600);      // GSM module
+  gps.begin(9600);      // GPS module
+
+  delay(2000);
+  Serial.println("System ready.");
+}
+
+void loop() {
+  int sensorValue = digitalRead(vibrationPin);
+
+  if (sensorValue == HIGH) {
+    Serial.println("Vibration detected!");
+    if (!smsSent) {
+      if (getGPSLocation()) {
+        sendSMS(gpsParser.location.lat(), gpsParser.location.lng());
+      } else {
+        Serial.println("GPS location not available.");
+        sendSMS(-1, -1); // Indicating unavailable
+      }
+      smsSent = true;
+    }
+  } else {
+    Serial.println("No vibration.");
+    smsSent = false;
+  }
+
+  // Continuously feed GPS data to parser
+  while (gps.available()) {
+    gpsParser.encode(gps.read());
+  }
+
+  delay(1000);
+}
+
+// Function to get a valid GPS location
+bool getGPSLocation() {
+  unsigned long start = millis();
+  while (millis() - start < 5000) { // Try for 5 seconds
+    while (gps.available()) {
+      if (gpsParser.encode(gps.read())) {
+        if (gpsParser.location.isValid()) {
+          Serial.print("Latitude: ");
+          Serial.println(gpsParser.location.lat(), 6);
+          Serial.print("Longitude: ");
+          Serial.println(gpsParser.location.lng(), 6);
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Function to send SMS to two numbers with Google Maps link
+void sendSMS(float lat, float lon) {
+  String message = "Alert! Vibration detected.\n";
+  if (lat == -1 && lon == -1) {
+    message += "Location: Unavailable";
+  } else {
+    message += "Location: https://maps.google.com/?q=";
+    message += String(lat, 6);
+    message += ",";
+    message += String(lon, 6);
+  }
+
+  // Send to first number
+  gsm.println("AT+CMGF=1"); // Text mode
+  delay(1000);
+  gsm.println("AT+CMGS=\"+918767415098\""); // First number
+  delay(1000);
+  gsm.print(message);
+  gsm.write(26); // End with Ctrl+Z
+  delay(3000);
+
+  // Send to second number
+  gsm.println("AT+CMGF=1"); // Text mode
+  delay(1000);
+  gsm.println("AT+CMGS=\"+918767415098\""); // Second number
+  delay(1000);
+  gsm.print(message);
+  gsm.write(26); // End with Ctrl+Z
+  delay(3000);
+
+  Serial.println("SMS sent to both numbers.");
+}
